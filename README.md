@@ -15,7 +15,7 @@ This script automates the installation and configuration of the 3x-ui VPN panel 
 ## Prerequisites
 - A fresh Ubuntu 20.04/22.04 or Debian server.
 - Two pointing subdomains from Cloudflare:
-  - `Panel Domain` (e.g., amigos.yourdomain.com) -> **Proxy OFF (Grey Cloud)**
+  - `Panel Domain` (e.g., panel.yourdomain.com) -> **Proxy OFF (Grey Cloud)**
   - `CDN Domain` (e.g., cdn.yourdomain.com) -> **Proxy OFF** during installation, then turn **ON** later.
 
 ## Quick Install Command
