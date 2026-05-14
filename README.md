@@ -21,17 +21,18 @@ This script automates the installation and configuration of the 3x-ui VPN panel 
 ## Quick Install Command
 Run the following command as `root`:
 
+## Default Credentials
+Username: admin
+Password: admin123
+
+Panel URL: https://your-panel-domain:2053/panel
+
+## Important Notes
+After the installation is complete, your newly generated Reality Keys will be saved in the home directory at ~/reality_keys.txt.
+
 ```bash
 bash <(curl -Ls [https://raw.githubusercontent.com/R4in8ow/vpn-auto-script/main/install.sh]
 (https://raw.githubusercontent.com/R4in8ow/vpn-auto-script/main/install.sh))
 
 
-Default Credentials
-Username: admin
 
-Password: admin123
-
-Panel URL: https://your-panel-domain:2053/panel
-
-Important Note
-After the installation is complete, your newly generated Reality Keys will be saved in the home directory at ~/reality_keys.txt.
