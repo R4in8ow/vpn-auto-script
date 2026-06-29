@@ -67,8 +67,8 @@ using the domains/ports you provided during setup.
 ## Usage
 
 ```bash
-git clone https://github.com/yourusername/vpn-autoinstall.git
-cd vpn-autoinstall
+git clone https://github.com/R4in8ow/vpn-auto-script.git
+cd vpn-auto-script
 chmod +x install.sh
 sudo bash install.sh
 ```
