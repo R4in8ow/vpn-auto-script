@@ -2,30 +2,30 @@
 #
 # ============================================================================
 #  X-UI VPN Server Auto-Installer
-#  Stack: Ubuntu 24.04 + x-ui (3x-ui) + Nginx + Certbot + UFW
+#  Stack: Ubuntu 22.04/24.04 + x-ui (3x-ui) + Nginx + Certbot + UFW
 #  Protocols: VLESS+Reality, VLESS+WS (CDN-ready), Hysteria2
 # ============================================================================
 #
 #  USAGE:
 #    sudo bash install.sh
 #
+#  Everything below is asked interactively — no domain names, passwords,
+#  or ports are hardcoded in this script. Just answer the prompts.
+#
 #  WHAT THIS DOES:
 #    1. System update + BBR + kernel/file-limit tuning
 #    2. Installs Nginx, Certbot, sqlite3, UFW
 #    3. Installs 3x-ui panel
-#    4. Issues Let's Encrypt SSL certs for panel domain + CDN domain
-#    5. Writes Nginx reverse-proxy configs for panel + CDN(WS) domains
-#    6. Opens required firewall ports
-#    7. Prints a final summary of what to configure manually inside the
-#       x-ui panel (inbounds must be created via the panel UI/API, since
-#       client lists differ per deployment)
+#    4. Issues Let's Encrypt SSL certs for your panel domain + CDN domain
+#    5. Sets your chosen admin username/password on the x-ui panel
+#    6. Writes Nginx reverse-proxy configs for panel + CDN(WS) domains
+#    7. Opens required firewall ports
+#    8. Prints a final summary + next manual steps (creating inbounds)
 #
-#  WHAT THIS DOES NOT DO (must be done manually after):
-#    - Create the actual inbounds (Reality / Hysteria2 / CDN) inside x-ui
-#      panel UI, because Reality private keys must be generated per-server
-#      and CDN domain DNS must point to this server first.
-#    - Point your domain's DNS records at this server's IP (do this BEFORE
-#      running the certbot steps, or they will fail).
+#  WHAT THIS DOES NOT DO (must be done manually after, inside the panel):
+#    - Create the actual inbounds (Reality / Hysteria2 / CDN), because
+#      client lists/limits are deployment-specific and the CDN domain
+#      must already resolve via DNS before SSL issuance works.
 #
 # ============================================================================
 
@@ -37,11 +37,13 @@ set -euo pipefail
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
+BOLD='\033[1m'
 NC='\033[0m'
 
 info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; }
+ask_header() { echo -e "\n${BOLD}$1${NC}"; }
 
 if [[ $EUID -ne 0 ]]; then
    error "This script must be run as root. Try: sudo bash install.sh"
@@ -49,53 +51,114 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 1. Collect configuration from user
+# 1. Welcome + DNS reminder
 # ---------------------------------------------------------------------------
-echo "=============================================="
-echo " X-UI VPN Server Auto-Installer"
-echo "=============================================="
+clear
+cat << 'BANNER'
+==============================================================
+   X-UI VPN SERVER AUTO-INSTALLER
+   VLESS+Reality / Hysteria2 / VLESS+WS (CDN-ready)
+==============================================================
+BANNER
+
 echo ""
-echo "Before continuing, make sure these DNS A records already point"
-echo "to this server's public IP (DNS-only / grey-cloud for panel domain,"
-echo "Proxied / orange-cloud is OK for the CDN domain):"
+echo "Before continuing, point these DNS A records at this server's"
+echo "public IP (you'll be asked for the actual domain names next):"
 echo ""
-echo "  panel.yourdomain.com   -> THIS_SERVER_IP   (panel + reality + hysteria2)"
-echo "  cdn.yourdomain.com     -> THIS_SERVER_IP   (CDN/WS fallback protocol)"
+echo "   <panel domain>  -> THIS_SERVER_IP   (DNS-only / grey-cloud recommended)"
+echo "   <cdn domain>    -> THIS_SERVER_IP   (Proxied / orange-cloud is fine here)"
 echo ""
-read -rp "Panel/VPN domain (e.g. panel.example.com): " PANEL_DOMAIN
-read -rp "CDN domain (e.g. cdn.example.com): " CDN_DOMAIN
-read -rp "Email for Let's Encrypt notifications: " LE_EMAIL
+read -rp "Press Enter once your DNS records are in place, or Ctrl+C to abort... "
+
+# ---------------------------------------------------------------------------
+# 2. Interactive configuration — domains
+# ---------------------------------------------------------------------------
+ask_header "STEP 1 / 4 — Domains"
+
+while true; do
+    read -rp "Panel/VPN domain (e.g. panel.yourdomain.com): " PANEL_DOMAIN
+    [[ -n "$PANEL_DOMAIN" ]] && break
+    warn "Domain cannot be empty."
+done
+
+while true; do
+    read -rp "CDN domain (e.g. cdn.yourdomain.com): " CDN_DOMAIN
+    [[ -n "$CDN_DOMAIN" ]] && break
+    warn "Domain cannot be empty."
+done
+
+while true; do
+    read -rp "Email for Let's Encrypt renewal notices: " LE_EMAIL
+    [[ "$LE_EMAIL" =~ ^[^[:space:]]+@[^[:space:]]+\.[^[:space:]]+$ ]] && break
+    warn "Please enter a valid email address."
+done
+
+# ---------------------------------------------------------------------------
+# 3. Interactive configuration — internal ports
+# ---------------------------------------------------------------------------
+ask_header "STEP 2 / 4 — Internal Ports (press Enter to accept the default)"
+
 read -rp "x-ui panel port [2053]: " PANEL_PORT
 PANEL_PORT=${PANEL_PORT:-2053}
+
 read -rp "CDN inbound internal port [2083]: " CDN_PORT
 CDN_PORT=${CDN_PORT:-2083}
+
 read -rp "Subscription/bot internal port [2096]: " SUB_PORT
 SUB_PORT=${SUB_PORT:-2096}
 
+# ---------------------------------------------------------------------------
+# 4. Interactive configuration — admin credentials
+# ---------------------------------------------------------------------------
+ask_header "STEP 3 / 4 — Panel Admin Login"
+
+read -rp "Admin username [admin]: " ADMIN_USER
+ADMIN_USER=${ADMIN_USER:-admin}
+
+while true; do
+    read -rsp "Admin password (min 8 characters): " ADMIN_PASS
+    echo ""
+    if [[ ${#ADMIN_PASS} -lt 8 ]]; then
+        warn "Password too short, please use at least 8 characters."
+        continue
+    fi
+    read -rsp "Confirm admin password: " ADMIN_PASS_CONFIRM
+    echo ""
+    if [[ "$ADMIN_PASS" != "$ADMIN_PASS_CONFIRM" ]]; then
+        warn "Passwords did not match, try again."
+        continue
+    fi
+    break
+done
+
+# ---------------------------------------------------------------------------
+# 5. Final confirmation before making any changes
+# ---------------------------------------------------------------------------
+ask_header "STEP 4 / 4 — Review"
+
+echo "  Panel domain     : $PANEL_DOMAIN"
+echo "  CDN domain       : $CDN_DOMAIN"
+echo "  Let's Encrypt email : $LE_EMAIL"
+echo "  Panel port       : $PANEL_PORT"
+echo "  CDN port         : $CDN_PORT"
+echo "  Sub/bot port     : $SUB_PORT"
+echo "  Admin username   : $ADMIN_USER"
+echo "  Admin password   : (hidden, ${#ADMIN_PASS} characters)"
 echo ""
-info "Configuration:"
-echo "  Panel domain : $PANEL_DOMAIN"
-echo "  CDN domain   : $CDN_DOMAIN"
-echo "  LE email     : $LE_EMAIL"
-echo "  Panel port   : $PANEL_PORT"
-echo "  CDN port     : $CDN_PORT"
-echo "  Sub port     : $SUB_PORT"
-echo ""
-read -rp "Continue with installation? [y/N]: " CONFIRM
+read -rp "Proceed with installation using the above? [y/N]: " CONFIRM
 if [[ "${CONFIRM,,}" != "y" ]]; then
-    echo "Aborted."
+    echo "Aborted. Re-run the script to start again."
     exit 0
 fi
 
 # ---------------------------------------------------------------------------
-# 2. System update + kernel tuning (BBR, file limits)
+# 6. System update + kernel tuning (BBR, file limits)
 # ---------------------------------------------------------------------------
 info "Updating system packages..."
 apt update -y && apt upgrade -y
 
 info "Applying BBR + network tuning..."
 SYSCTL_FILE="/etc/sysctl.conf"
-# Avoid duplicate entries on re-run
 grep -q "net.core.default_qdisc=fq" "$SYSCTL_FILE" || cat >> "$SYSCTL_FILE" << 'EOF'
 
 # --- VPN server tuning (added by auto-installer) ---
@@ -122,7 +185,7 @@ root hard nofile 655350
 EOF
 
 # ---------------------------------------------------------------------------
-# 3. Install base packages: Nginx, Certbot, sqlite3, UFW, curl
+# 7. Install base packages: Nginx, Certbot, sqlite3, UFW, curl
 # ---------------------------------------------------------------------------
 info "Installing Nginx, Certbot, UFW, sqlite3..."
 apt install -y nginx certbot python3-certbot-nginx sqlite3 ufw curl socat cron
@@ -131,7 +194,7 @@ systemctl enable nginx
 systemctl start nginx
 
 # ---------------------------------------------------------------------------
-# 4. Firewall (UFW) baseline rules
+# 8. Firewall (UFW) baseline rules
 # ---------------------------------------------------------------------------
 info "Configuring firewall (UFW)..."
 ufw allow OpenSSH
@@ -142,27 +205,25 @@ ufw allow 443/udp
 ufw allow "${PANEL_PORT}/tcp"
 ufw allow "${CDN_PORT}/tcp"
 ufw allow "${SUB_PORT}/tcp"
-# Common Reality / Hysteria2 high ports - adjust after creating inbounds
-ufw allow 8443/tcp
-ufw allow 8443/udp
 echo "y" | ufw enable
 
 # ---------------------------------------------------------------------------
-# 5. Issue SSL certificates (standalone, before nginx vhosts exist)
+# 9. Issue SSL certificates (standalone, before nginx vhosts exist)
 # ---------------------------------------------------------------------------
 info "Issuing SSL certificate for panel domain: $PANEL_DOMAIN ..."
-# Temporarily stop nginx so certbot standalone can bind port 80
 systemctl stop nginx
 certbot certonly --standalone --non-interactive --agree-tos \
     -m "$LE_EMAIL" -d "$PANEL_DOMAIN" || {
-        error "Certbot failed for $PANEL_DOMAIN. Check DNS A record, then re-run certbot manually:"
+        error "Certbot failed for $PANEL_DOMAIN."
+        error "Check that its DNS A record points to this server, then re-run:"
         error "  certbot certonly --standalone -d $PANEL_DOMAIN"
     }
 
 info "Issuing SSL certificate for CDN domain: $CDN_DOMAIN ..."
 certbot certonly --standalone --non-interactive --agree-tos \
     -m "$LE_EMAIL" -d "$CDN_DOMAIN" || {
-        error "Certbot failed for $CDN_DOMAIN. Check DNS A record, then re-run certbot manually:"
+        error "Certbot failed for $CDN_DOMAIN."
+        error "Check that its DNS A record points to this server, then re-run:"
         error "  certbot certonly --standalone -d $CDN_DOMAIN"
     }
 
@@ -171,7 +232,7 @@ systemctl enable certbot.timer
 systemctl start certbot.timer
 
 # ---------------------------------------------------------------------------
-# 6. Install x-ui (3x-ui)
+# 10. Install x-ui (3x-ui)
 # ---------------------------------------------------------------------------
 info "Installing x-ui (3x-ui)..."
 if [ -d /usr/local/x-ui ]; then
@@ -181,25 +242,38 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 7. Configure x-ui panel settings (port, cert paths, base path)
+# 11. Configure x-ui panel settings (port, cert paths, admin credentials)
 # ---------------------------------------------------------------------------
-info "Configuring x-ui panel to use issued certificate..."
+info "Configuring x-ui panel (port, cert paths, admin login)..."
 systemctl stop x-ui || true
 
 X_UI_DB="/etc/x-ui/x-ui.db"
+if [ ! -f "$X_UI_DB" ]; then
+    # First run sometimes needs the binary to be launched once to create the DB
+    warn "x-ui database not found yet, initializing it..."
+    timeout 5 /usr/local/x-ui/x-ui run >/dev/null 2>&1 || true
+    sleep 2
+    pkill -f "/usr/local/x-ui/x-ui run" >/dev/null 2>&1 || true
+fi
+
 if [ -f "$X_UI_DB" ]; then
     sqlite3 "$X_UI_DB" "UPDATE settings SET value='${PANEL_PORT}' WHERE key='webPort';"
     sqlite3 "$X_UI_DB" "UPDATE settings SET value='/etc/letsencrypt/live/${PANEL_DOMAIN}/fullchain.pem' WHERE key='webCertFile';"
     sqlite3 "$X_UI_DB" "UPDATE settings SET value='/etc/letsencrypt/live/${PANEL_DOMAIN}/privkey.pem' WHERE key='webKeyFile';"
+
+    # Set admin credentials using x-ui's own CLI (preferred — handles password hashing correctly)
+    /usr/local/x-ui/x-ui setting -username "$ADMIN_USER" -password "$ADMIN_PASS" >/dev/null 2>&1 || \
+        warn "Could not set admin credentials via CLI — set them manually after first login via: x-ui"
 else
-    warn "x-ui database not found yet — open the panel once via 'x-ui' command to initialize it, then re-run the cert step manually."
+    warn "x-ui database still not found. After install finishes, run 'x-ui' once manually,"
+    warn "then re-run the cert/port/admin configuration steps from this script if needed."
 fi
 
 systemctl start x-ui
 systemctl enable x-ui
 
 # ---------------------------------------------------------------------------
-# 8. Nginx reverse proxy configs
+# 12. Nginx reverse proxy configs
 # ---------------------------------------------------------------------------
 info "Writing Nginx config for panel domain..."
 cat > "/etc/nginx/sites-available/${PANEL_DOMAIN}" << EOF
@@ -274,7 +348,7 @@ rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl reload nginx
 
 # ---------------------------------------------------------------------------
-# 9. Generate Reality keypair (for convenience, user pastes into panel)
+# 13. Generate Reality keypair (for convenience, user pastes into panel)
 # ---------------------------------------------------------------------------
 info "Generating a Reality x25519 keypair for convenience..."
 if [ -x /usr/local/x-ui/bin/xray-linux-amd64 ]; then
@@ -284,7 +358,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 10. Final summary
+# 14. Final summary
 # ---------------------------------------------------------------------------
 SERVER_IP=$(curl -s -4 ifconfig.me || hostname -I | awk '{print $1}')
 
@@ -294,9 +368,11 @@ cat << SUMMARY
  INSTALLATION COMPLETE
 ==============================================================
 
-Server IP        : ${SERVER_IP}
-Panel URL         : https://${PANEL_DOMAIN}/panel/
-CDN domain         : https://${CDN_DOMAIN}/vless  (point this at port ${CDN_PORT})
+Server IP          : ${SERVER_IP}
+Panel URL          : https://${PANEL_DOMAIN}/panel/
+Admin username     : ${ADMIN_USER}
+Admin password     : (the one you entered above)
+CDN domain         : https://${CDN_DOMAIN}/vless  (routes to port ${CDN_PORT})
 
 Reality keypair (for VLESS+Reality inbound):
 ${REALITY_KEYS}
@@ -304,9 +380,8 @@ ${REALITY_KEYS}
 ------------------------------------------------------------
 NEXT STEPS (manual, inside x-ui panel UI):
 ------------------------------------------------------------
-1. Open https://${PANEL_DOMAIN}/panel/ and log in
-   (default credentials were set during 3x-ui install — check
-   the installer output above, or run: x-ui  -> option to show/reset login)
+1. Open https://${PANEL_DOMAIN}/panel/ and log in with the
+   admin username/password you set above.
 
 2. Create inbound: VLESS + Reality
    - Port: any free port (e.g. 36878)
@@ -322,28 +397,30 @@ NEXT STEPS (manual, inside x-ui panel UI):
    - Open that port in firewall: ufw allow <port>/udp
 
 4. Create inbound: VLESS + WS (CDN)
-   - Port: ${CDN_PORT} (must match nginx config above)
-   - Network: ws, Security: none (TLS already terminated by Nginx)
-   - Path: /vless (must match nginx location block above)
+   - Port: ${CDN_PORT} (must match the Nginx config written above)
+   - Network: ws, Security: none (TLS is already terminated by Nginx)
+   - Path: /vless (must match the Nginx location block above)
    - Host: ${CDN_DOMAIN}
 
 5. Add clients to each inbound and copy their connection links into
    Happ / V2rayNG / V2rayTun / Hiddify / Karing.
 
-6. (Optional, for download-site blocking) Add routing rule in each
-   inbound's "Advanced" / outbound rules to block domains such as:
+6. (Optional, for download-site blocking) Add a routing rule in each
+   inbound's outbound rules to block domains such as:
    drive.google.com, mega.nz, mediafire.com, play.google.com,
    itunes.apple.com, ota.itunes.apple.com, updates.cdn-apple.com
 
 ------------------------------------------------------------
 IMPORTANT NOTES:
 ------------------------------------------------------------
-- If CDN domain DNS is "Proxied" (orange cloud) on Cloudflare, set
-  Cloudflare SSL/TLS mode to "Full" or "Full (strict)" — NOT "Flexible".
-- If Hysteria2 protocol times out, double check the UDP port is
-  allowed in BOTH ufw and any upstream cloud firewall (e.g. DigitalOcean
-  Cloud Firewall), since ufw alone is not enough on most cloud providers.
-- Panel default login must be changed immediately after first login.
+- If your CDN domain's DNS is "Proxied" (orange cloud) on Cloudflare,
+  set Cloudflare's SSL/TLS mode to "Full" or "Full (strict)" — NOT
+  "Flexible" — or the CDN protocol will silently fail.
+- Whatever port you choose for Reality/Hysteria2 inbounds, remember to
+  open it in BOTH ufw (this script only opened the panel/CDN/sub ports)
+  AND your cloud provider's network firewall (DigitalOcean Cloud
+  Firewall, AWS Security Group, etc.) — missing the cloud-level rule is
+  the most common cause of "connects then times out".
 
 ==============================================================
 SUMMARY
