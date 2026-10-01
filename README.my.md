@@ -114,6 +114,225 @@ Credential အား လုံး ကို install လုပ် တုန်း
 (permission 600, root သာ ဖတ် နိုင်) မှာ သိမ်း ထား ပေး ပါ တယ်။
 Happ, V2rayNG, V2rayTun, Hiddify, Karing, Outline, Streisand, Nekoray တို့ နဲ့ သုံး နိုင်။
 
+## Manual settings (လက် နဲ့ ပြင် ဆင် ရန် လမ်း ညွှန်)
+
+Installer က အောက် က အား လုံး ကို အလိုအလျောက် လုပ် ပေး ပါ တယ်။
+ဒီ အပိုင်း ကတော့ automation က ရေး သွား တဲ့ **တန်ဖိုး အတိ အကျ တွေ နဲ့
+ဘယ် နေ ရာ မှာ ရောက် သွား လဲ** ဆို တာ ကို မှတ် တမ်း တင် ထား တာ ဖြစ် လို့
+လူ ကိုယ် တိုင် အစ က နေ ပြန် လုပ် ချင် / စစ် ချင် / ပြင် ချင် ရင် ဒါ ကို
+ကြည့် ပြီး လုပ် နိုင် ပါ တယ်။ တန်ဖိုး အား လုံး က installer default တွေ —
+ကိုယ့် domain/port နဲ့ အ စား ထိုး သုံး ပါ။
+
+### Secret တွေ ကို လက် နဲ့ ထုတ် ရန်
+
+```bash
+# Reality x25519 keypair ("Password" ဆို တဲ့ လိုင်း က client တွေ မှာ
+# ထည့် ရမယ့် public key, private key က server ပေါ် မှာ သာ ထား)
+/usr/local/x-ui/bin/xray-linux-amd64 x25519
+
+# Reality shortId (hex 16 လုံး)
+openssl rand -hex 8
+
+# Client UUID များ (VLESS inbound တစ် ခု မှာ တစ် ခု)
+cat /proc/sys/kernel/random/uuid
+
+# Hysteria2 / TUIC client password (စာ လုံး 16 လုံး)
+openssl rand -base64 16 | tr -d '/+=' | cut -c1-16
+
+# Shadowsocks 2022-blake3-aes-128-gcm password: 16 byte အတိ အကျ ကို
+# base64 နဲ့ ပြောင်း ထား တာ (ဖြတ် မ ပစ် ရ — cipher က 16 byte အပြည့် လို)
+openssl rand -base64 16
+```
+
+### x-ui panel settings
+
+Panel UI ထဲ က **Panel Settings** မှာ ပြင် နိုင်။ Command နဲ့ ဆို —
+
+| Setting | တန် ဖိုး | လက် နဲ့ ပြင် ရန် |
+|---|---|---|
+| Panel port | `2053` | `x-ui setting -port 2053` |
+| Web Base Path | `/panel/` | `x-ui setting -webBasePath /panel/` |
+| Public Key Path | `/etc/letsencrypt/live/panel.example.com/fullchain.pem` | Panel Settings → SSL |
+| Private Key Path | `/etc/letsencrypt/live/panel.example.com/privkey.pem` | Panel Settings → SSL |
+| Admin username / password | ကိုယ့် စိတ် ကြိုက် (အနည်း ဆုံး 8 လုံး) | `x-ui setting -username … -password …` |
+
+Subscription (Panel Settings → Subscription):
+
+| Key | တန် ဖိုး |
+|---|---|
+| Enable subscription | true |
+| Subscription port | `2096` |
+| Subscription path | `/sub/` |
+| Subscription URI | `https://panel.example.com/sub/` |
+| Subscription domain | `panel.example.com` |
+
+Port (သို့) base path ပြောင်း ပြီး ရင် `systemctl restart x-ui` လုပ် ရ
+မယ်။ ပြီးရင် panel က `https://panel.example.com/panel/` မှာ ရောက် ပါ
+မယ်, subscription link က `https://panel.example.com/sub/<subId>` ပုံစံ
+ဖြစ် ပါ မယ်။
+
+### Inbound များ — လက် နဲ့ ဖြည့် ရမယ့် field များ
+
+**Inbounds → Add Inbound** က နေ တစ် ခု ချင်း ဖန် တီး။ စ စ ချင်း inbound
+တစ် ခု မှာ bootstrap client တစ် ခု ပါ ရင် လုံ လောက် ပါ တယ်, နောက် မှ
+user အစစ် တွေ ကို သက် တမ်း/traffic limit နဲ့ ထည့် ပါ။
+
+**1. Reality** — VLESS, TCP `36878`
+- Network `tcp`, Security `reality`
+- Dest `web.dev:443`, ServerNames/SNI `web.dev`, xver `0`
+- Private Key: `<xray x25519 က ထုတ်>` , Short IDs: `<hex 16 လုံး>`
+- uTLS fingerprint `chrome`
+- Client: UUID, Flow `xtls-rprx-vision`
+- Sniffing: enabled, destOverride `http,tls,quic,fakedns`
+
+**2. CDN-Vless** — VLESS, TCP `8443`
+- Network `ws`, Security `none` (nginx က TLS ဖြည် ပြီး သား မို့ `tls`
+  ထား ရင် double-TLS ဖြစ် ပြီး ပျက် တတ် တယ် — ဒါ က အဖြစ် များ တဲ့ အ မှား)
+- Path `/vless`, Host header `cdn.example.com`
+- Client: UUID
+
+**3. CDN-gRPC** — VLESS, TCP `2087`
+- Network `grpc`, Security `tls`
+- ServiceName `vless-grpc`
+- TLS serverName `panel.example.com`, certificate
+  `/etc/letsencrypt/live/panel.example.com/fullchain.pem`, key
+  `/etc/letsencrypt/live/panel.example.com/privkey.pem`, ALPN `h2,http/1.1`
+- Client: UUID
+
+**4. XHTTP** — VLESS, TCP `2089`
+- Network `xhttp`, Security `none`
+- Path `/xhttp`, Mode `auto`
+- Client: UUID
+
+**5. Hysteria2** — hysteria2, UDP `40797`
+- TLS serverName `panel.example.com`, အပေါ် က LE cert/key အတူ တူ, ALPN `h3`
+- Client: password နဲ့ စစ်
+
+**6. Outline** — shadowsocks, TCP+UDP `58023`
+- Method `2022-blake3-aes-128-gcm`
+- Password: 16 random byte ကို base64 ပြောင်း ထား တာ (အပေါ် က နည်း)
+- Network `tcp,udp`
+
+**7. TUIC** — tuic, UDP `443`
+- TLS serverName `panel.example.com`, အပေါ် က LE cert/key, ALPN `h3`
+- Congestion control `bbr`
+- Client: password နဲ့ စစ်
+
+### nginx — လက် နဲ့ ပြင် ဆင် ရန်
+
+`/etc/nginx/stream.conf` — public TCP/443 SNI router။ nginx မှာ stream
+module ပါ ရ မယ် (`nginx -V` မှာ `stream` ပါ ကြောင်း စစ်):
+
+```nginx
+stream {
+    map $ssl_preread_server_name $sni_backend {
+        web.dev 127.0.0.1:36878;   # Reality အယောင် SNI
+        default 127.0.0.1:4443;    # ကျန် တာ မှန် သ မျှ -> web vhosts
+    }
+    server {
+        listen 443;
+        listen [::]:443;
+        proxy_pass $sni_backend;
+        ssl_preread on;            # SNI ကို ချောင်း ကြည့် ရုံ, TLS မ ဖြည်
+    }
+}
+```
+
+`/etc/nginx/nginx.conf` ရဲ့ top level (`http {}` အပြင် ဘက်) မှာ
+`include /etc/nginx/stream.conf;` ထည့် ရ မယ်။
+
+Panel vhost — HTTPS ကို `127.0.0.1:4443` မှာ သာ နား ထောင် (public 443 က
+stream router ပိုင်):
+
+```nginx
+server {
+    listen 127.0.0.1:4443 ssl;
+    server_name panel.example.com;
+    ssl_certificate /etc/letsencrypt/live/panel.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/panel.example.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    location /panel/ {
+        proxy_pass http://127.0.0.1:2053/panel/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    location / {
+        proxy_pass http://127.0.0.1:2096;  # 3x-ui subscription service
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+CDN vhost — listener `127.0.0.1:4443` အတူ တူ, `server_name cdn.example.com`
+(ကိုယ့် LE cert သက် သက်):
+
+```nginx
+    location /vless {
+        proxy_pass http://127.0.0.1:8443;
+        proxy_http_version 1.1;              # WebSocket က HTTP/1.1 လို
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+    location /xhttp {
+        proxy_pass http://127.0.0.1:2089;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+    }
+```
+
+Domain နှစ် ခု လုံး မှာ port-80 server တစ် ခု စီ လို ပါ တယ် —
+`location /.well-known/acme-challenge/ { root /var/www/html; }` ပါ ရ
+မယ်, ဒါ မှ certbot `--webroot` က nginx မ ရပ် ပဲ cert ထုတ် နိုင် မှာ။
+
+Classic ပုံစံ (`--no-sni-routing`): vhost တွေ အတူ တူ ပဲ, ဒါ ပေ မယ့်
+`listen 443 ssl;` (interface အား လုံး) ထား ပြီး `stream.conf` မ လို။
+
+### UFW — လက် နဲ့ ဖွင့် ရမယ့် rule များ
+
+```bash
+ufw allow OpenSSH
+ufw allow 80/tcp
+ufw allow 443/tcp          # nginx stream (SNI router)
+ufw allow 443/udp          # TUIC
+ufw allow 2053/tcp         # x-ui panel
+ufw allow 2096/tcp         # subscription service
+ufw allow 36878/tcp        # Reality (တိုက် ရိုက် အရန် လမ်း)
+ufw allow 8443/tcp         # VLESS+WS
+ufw allow 2087/tcp         # VLESS+gRPC
+ufw allow 2089/tcp         # VLESS+XHTTP
+ufw allow 40797/udp        # Hysteria2
+ufw allow 58023/tcp        # Shadowsocks
+ufw allow 58023/udp        # Shadowsocks
+ufw default deny incoming  # optional, ထား သင့်
+ufw enable
+```
+
+သတိ ရ ရန်: cloud provider ရဲ့ network firewall သက် သက် ရှိ ပါ သေး တယ် —
+အဲဒီ မှာ လည်း port တွေ အတူ တူ ဖွင့် ရ မယ်။
+
+### လက် နဲ့ စစ် ဆေး ရန် checklist
+
+- [ ] `nginx -t` အောင်, `systemctl is-active nginx` → `active`
+- [ ] `curl -sk -o /dev/null -w "%{http_code}\n" https://panel.example.com/panel/login` → `200`
+- [ ] `ss -tln | grep -E ':(443|4443|2053|2096|36878|8443|2087|2089|58023) '` — port တိုင်း နား ထောင် နေ
+- [ ] `ss -uln | grep -E ':(443|40797|58023) '` — UDP port တိုင်း နား ထောင် နေ
+- [ ] `openssl x509 -checkend 0 -noout -in /etc/letsencrypt/live/panel.example.com/fullchain.pem`
+- [ ] `sysctl -n net.ipv4.tcp_congestion_control` → `bbr`
+- [ ] Panel UI → Inbounds: 7 ခု လုံး ရှိ, enable ဖြစ်
+- [ ] Panel UI → Server status: Xray `running`
+- [ ] `sqlite3 /etc/x-ui/x-ui.db "SELECT remark,port,protocol FROM inbounds;"` — 7 ခု လုံး ပေါ်
+- [ ] `curl -s https://panel.example.com/sub/<subId>` — client config ရ
+- [ ] အဆုံး သတ်: client link တစ် ခု ကို V2rayNG/Happ ထဲ သွင်း ပြီး page ဖွင့် ကြည့်
+
 ## Install ပြီး စစ် ဆေး ရန်
 
 Installer က ပြီးသွား ရင် self-test လုပ် ပြီး သား (panel HTTPS ရောက်/မရောက်,
