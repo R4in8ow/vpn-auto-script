@@ -1,115 +1,192 @@
-# VPN Server Auto-Installer (x-ui based)
+# VPN Auto-Script
 
-One-shot, fully interactive installer for a censorship-resistant VPN
-server on a fresh Ubuntu 22.04/24.04 VPS, using
-[3x-ui](https://github.com/MHSanaei/3x-ui) as the panel/core, with three
-protocols ready to configure:
+[![Ubuntu 24.04](https://img.shields.io/badge/Ubuntu-24.04%20%7C%2022.04-E95420?logo=ubuntu&logoColor=white)](https://ubuntu.com)
+[![3x-ui](https://img.shields.io/badge/panel-3x--ui-blue)](https://github.com/MHSanaei/3x-ui)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-2.0.0-blueviolet)]()
 
-- **VLESS + Reality** (TCP, no CDN needed, very hard to fingerprint)
-- **Hysteria2** (UDP/QUIC, fastest, best for high-latency/lossy networks)
-- **VLESS + WS** behind Nginx + a CDN domain (works even when raw IPs are
-  blocked, since traffic looks like normal HTTPS to a real-looking domain)
+> 🇲🇲 မြန်မာ ဘာသာဖြင့် ဖတ်ရန်: [README.my.md](README.my.md)
 
-This mirrors a production setup tested against active DPI/firewall
-blocking conditions.
+One command turns a fresh Ubuntu VPS into a fully working,
+censorship-resistant VPN server. No manual panel steps — all seven
+protocol inbounds are created automatically through the 3x-ui REST API.
 
-**Nothing is hardcoded.** The script asks you for every domain, port, and
-credential it needs — just answer the prompts.
+## What it is
 
-## What it asks you for
+`install.sh` provisions the exact stack this project runs in production:
 
-| Prompt | Example | Notes |
-|---|---|---|
-| Panel/VPN domain | `panel.yourdomain.com` | Must already point at this server's IP |
-| CDN domain | `cdn.yourdomain.com` | Must already point at this server's IP |
-| Let's Encrypt email | `you@example.com` | For renewal notices only |
-| Panel port | `2053` (default) | Press Enter to accept default |
-| CDN inbound port | `2083` (default) | Press Enter to accept default |
-| Subscription/bot port | `2096` (default) | Press Enter to accept default |
-| Admin username | `admin` (default) | Used to log into the x-ui panel |
-| Admin password | (you choose) | Min. 8 characters, asked twice to confirm |
+- **3x-ui** panel + Xray core (latest release via the official installer)
+- **Nginx** as an SNI router (public 443 shared between Reality and the
+  web panel) plus TLS-terminating reverse proxy
+- **Let's Encrypt** certificates with zero-downtime `--webroot` issuance
+- **UFW** firewall, **BBR** tuning, 4G swap, raised file limits,
+  unattended security upgrades, optional fail2ban
 
-After collecting everything, it shows a summary and asks for final
-confirmation (`y/N`) before making any changes to the system.
+After it finishes, clients can connect immediately — no clicking around
+in the panel required.
 
-## What it installs
+## Features
 
-| Component | Purpose |
-|---|---|
-| Ubuntu BBR + sysctl tuning | Lower latency, higher throughput |
-| Nginx | TLS termination + reverse proxy for panel & CDN domain |
-| Certbot | Free Let's Encrypt SSL certs, auto-renewing |
-| 3x-ui | Web panel for managing inbounds/users/traffic limits |
-| UFW | Firewall, opens only the ports you configured |
-| sqlite3 | Used to pre-configure the x-ui panel port/cert/admin login |
+- 🚀 **True one-shot install** — `git clone` + `sudo bash install.sh`
+- 🔌 **7 inbounds auto-created**: VLESS+Reality, VLESS+WS, VLESS+gRPC,
+  VLESS+XHTTP, Hysteria2, Shadowsocks-2022, TUIC
+- 🧭 **SNI routing** — public TCP/443 serves Reality (SNI `web.dev`) and
+  the panel/CDN websites (everything else) at the same time
+- 🔑 **Fresh secrets per install** — Reality x25519 keypair, UUIDs,
+  passwords, all generated locally, never hardcoded
+- 📦 **`.env` support** — non-interactive installs for automation
+- ✅ **Post-install self-test** — panel reachability, listening ports,
+  certificate validity, Xray state, inbound count
+- 🧹 **`uninstall.sh`** — clean removal of everything the installer did
+- 🔒 **No secrets in the repo** — placeholders only, `.env` is gitignored
 
-## What it does NOT do automatically
+## Architecture overview
 
-Inbound creation (Reality / Hysteria2 / CDN-WS) is done **inside the x-ui
-panel UI** after install, because:
-- Reality requires a fresh keypair per server (generated for you, but you
-  paste it into the panel yourself)
-- Client lists, traffic limits, and expiry dates are deployment-specific
+```
+public TCP/443 ── nginx stream (ssl_preread, no TLS termination)
+    ├─ SNI web.dev ──▶ 127.0.0.1:36878   (Xray Reality)
+    └─ SNI other   ──▶ 127.0.0.1:4443    (nginx HTTPS: panel + CDN vhosts)
 
-The script prints exact step-by-step instructions for this at the end,
-using the domains/ports you provided during setup.
+public UDP/443 ──▶ Xray TUIC          public TCP/36878 ──▶ Xray Reality (fallback)
+CDN ──TCP/8443/2087/2089──▶ Xray WS / gRPC / XHTTP (via nginx or direct)
+public UDP/40797 ──▶ Hysteria2        public 58023/tcp+udp ──▶ Shadowsocks-2022
+```
+
+Full detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Requirements
 
-- Fresh Ubuntu 22.04 or 24.04 VPS (DigitalOcean, Vultr, etc.)
-- Root access
-- Two DNS A records already pointed at the server's IP **before running
-  the script**:
-  - your panel domain → server IP (DNS-only/grey-cloud recommended)
-  - your CDN domain → server IP (Proxied/orange-cloud OK if using
-    Cloudflare — just set SSL/TLS mode to "Full", not "Flexible")
+- Fresh **Ubuntu 24.04** (22.04 also works) VPS, root access
+- Two DNS **A records** already pointing at the server IP **before** you run it:
+  - `panel.example.com` → server IP (DNS-only / grey-cloud recommended)
+  - `cdn.example.com` → server IP (proxied / orange-cloud is fine —
+    set Cloudflare SSL/TLS mode to **Full**, not Flexible)
 
-## Usage
+## Quick start
 
 ```bash
 git clone https://github.com/R4in8ow/vpn-auto-script.git
 cd vpn-auto-script
-chmod +x install.sh
 sudo bash install.sh
 ```
 
-Then just answer each prompt as it appears.
+Answer the prompts (domains, ports, admin login). For unattended setups:
 
-## After install
+```bash
+cp .env.example .env   # fill in YOUR values
+sudo bash install.sh --non-interactive
+```
 
-1. Log into the panel at the URL printed at the end (your panel domain +
-   `/panel/`), using the admin username/password you chose during setup
-2. Create the three inbounds following the printed instructions
-3. Add clients, copy subscription/connection links into your client app
-   (Happ, V2rayNG, V2rayTun, Hiddify, Karing all supported)
+Use `sudo bash install.sh --no-sni-routing` for the classic layout
+(nginx HTTPS directly on public 443 instead of the SNI router).
 
-## Cloud firewall reminder
+## Configuration reference (`.env` variables)
 
-`ufw` only controls the OS firewall. Most cloud providers (DigitalOcean,
-AWS, etc.) also have a **separate network-level firewall** — make sure
-any custom ports you open for inbounds (Reality TCP port, Hysteria2 UDP
-port) are allowed there too, or connections will silently time out.
+| Variable | Default | Purpose |
+|---|---|---|
+| `PANEL_DOMAIN` | — | Panel + subscription domain |
+| `CDN_DOMAIN` | — | CDN domain for WS/XHTTP/gRPC |
+| `SUB_DOMAIN` | panel domain | Host used in subscription links |
+| `LE_EMAIL` | — | Let's Encrypt renewal notices |
+| `PANEL_PORT` | `2053` | x-ui panel port |
+| `SUB_PORT` | `2096` | Subscription service port |
+| `REALITY_PORT` | `36878` | Reality inbound (TCP) |
+| `WS_PORT` | `8443` | VLESS+WS inbound (TCP) |
+| `GRPC_PORT` | `2087` | VLESS+gRPC inbound (TCP) |
+| `XHTTP_PORT` | `2089` | VLESS+XHTTP inbound (TCP) |
+| `HY2_PORT` | `40797` | Hysteria2 inbound (UDP) |
+| `SS_PORT` | `58023` | Shadowsocks inbound (TCP+UDP) |
+| `TUIC_PORT` | `443` | TUIC inbound (UDP) |
+| `REALITY_DEST` | `web.dev:443` | Reality camouflage destination |
+| `REALITY_SNI` | `web.dev` | Reality SNI / serverName |
+| `ADMIN_USER` / `ADMIN_PASS` | — | Panel login (min 8 chars) |
+| `SNI_ROUTING` | `yes` | `no` = classic 443 layout |
+| `INSTALL_FAIL2BAN` | `no` | SSH brute-force protection |
+| `UFW_DEFAULT_DENY` | `no` | UFW default-deny incoming |
 
-## Troubleshooting
+## Protocol table
 
-| Symptom | Likely cause |
+| Inbound | Port | Transport | Client credential |
+|---|---|---|---|
+| VLESS + Reality | 36878/tcp (or 443 via SNI) | tcp + reality, uTLS chrome | UUID + `xtls-rprx-vision` |
+| VLESS + WS (CDN) | 8443/tcp | ws, path `/vless`, TLS at nginx | UUID |
+| VLESS + gRPC | 2087/tcp | grpc, service `vless-grpc`, TLS | UUID |
+| VLESS + XHTTP | 2089/tcp | xhttp, path `/xhttp` | UUID |
+| Hysteria2 | 40797/udp | TLS | password |
+| Shadowsocks 2022 | 58023/tcp+udp | `2022-blake3-aes-128-gcm` | password |
+| TUIC | 443/udp | TLS, congestion `bbr` | password |
+
+All credentials are generated at install time and saved root-only to
+`/root/vpn-credentials.env` (mode 600). Works with Happ, V2rayNG,
+V2rayTun, Hiddify, Karing, Outline, Streisand, Nekoray.
+
+## Post-install verification
+
+The installer already runs a self-test (panel HTTPS, listening
+TCP/UDP ports, certificate validity, Xray `running`, 7/7 inbounds,
+BBR active). Re-check any time with the commands in
+[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#useful-commands).
+
+## Troubleshooting (summary)
+
+| Symptom | Most likely cause |
 |---|---|
-| Panel won't load | Cert paths wrong in x-ui settings, or wrong port in Nginx config |
-| Reality/CDN connects then times out | Port not open in BOTH ufw and cloud firewall |
-| CDN protocol times out, Reality works | Cloudflare SSL/TLS mode set to "Flexible" instead of "Full" |
-| Hysteria2 times out | UDP port not open, or wrong cert path in inbound TLS settings |
-| Nginx 502 on panel/CDN domain | Wrong upstream port in Nginx config vs actual inbound port in x-ui |
-| Certbot fails during install | DNS A record not yet pointing at this server — wait for propagation, then re-run that certbot command manually |
+| Panel won't load | DNS not propagated; port blocked in cloud firewall |
+| Reality connects then times out | Port closed in provider firewall (not just UFW) |
+| CDN works via Reality but WS fails | Cloudflare SSL mode is "Flexible" — use Full |
+| Hysteria2/TUIC time out | UDP port not open (UFW + cloud firewall) |
+| Xray won't stay running | One malformed inbound — see `journalctl -u x-ui` |
 
-## Re-running the script
+Full guide: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
-The script is mostly safe to re-run (it checks before duplicating sysctl
-entries and skips the x-ui installer if already present), but SSL
-issuance and admin credential steps will run again. If you only need to
-change one thing, it's usually simpler to edit the relevant config file
-directly (Nginx vhost, or `x-ui` CLI for admin credentials) rather than
-re-running the whole script.
+## Security notes
+
+- **No credentials, domains, IPs, emails or keys are stored in this
+  repo.** Everything is prompted or read from your own (gitignored)
+  `.env`. Generated secrets live only on the server.
+- Change the bootstrap client credentials after install for real
+  deployments (one bootstrap client per inbound is created; add real
+  users with expiries/traffic caps in the panel).
+- Consider setting `UFW_DEFAULT_DENY=yes` and installing fail2ban.
+- Review `/root/vpn-credentials.env` permissions (600) and back it up
+  somewhere safe — then delete it from the server if you prefer.
+
+## Cloud-firewall reminder
+
+UFW is only the OS firewall. DigitalOcean, AWS, Vultr, etc. enforce a
+**separate network-level firewall** — open the same TCP/UDP ports
+there, or connections will silently time out. This is the single most
+common cause of "it works locally but not from my phone".
+
+## Roadmap
+
+- [ ] Server-side subscription sanitization (Reality currently exposes
+      its direct port — see known limitation in
+      [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md))
+- [ ] Multi-user provisioning helper script
+- [ ] Optional Cloudflare Tunnel mode (no open ports at all)
+
+## Uninstall
+
+```bash
+sudo bash uninstall.sh          # asks before each destructive step
+sudo bash uninstall.sh --yes    # no prompts
+```
+
+## Contributing
+
+Issues and PRs are welcome. Please keep the no-secrets rule: never
+commit domains, IPs, emails, passwords, keys or UUIDs — use the
+`example.com` placeholders. Run `bash -n` on every shell file before
+pushing.
+
+## Testing note
+
+All scripts pass `bash -n` syntax checks (and shellcheck where
+available). A full end-to-end run needs a fresh VPS and has not been
+executed in CI — if you run it, please report the result
+(Ubuntu version, SNI vs classic mode) in an issue.
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
