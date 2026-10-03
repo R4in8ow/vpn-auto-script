@@ -371,15 +371,6 @@ TCP/UDP port တွေ ကို ဖွင့် ပေး ရ မယ်။ မ 
 တိတ် တိတ် လေး timeout ဖြစ် နေ မှာ ပါ။ "ဖုန်း ထဲ က ချိတ် မ ရ" ဆို တာ ရဲ့
 အ ကြောင်း ရင်း နံပါတ် တစ် ဒါ ပဲ ဖြစ် ပါ တယ်။
 
-## အပို tools
-
-Installer နဲ့ အတူ ပါ တဲ့ ရွေး ချယ် စရာ tool (secret မ ပါ, ဘာ server
-မ ဆို သုံး လို့ ရ):
-
-- [`verify-free-servers/`](verify-free-servers/) — အပတ် တိုင်း third-party
-  VLESS/Trojan node တွေ ကို xray-core နဲ့ handshake စစ် ပြီး
-  `free-servers.json` ထုတ် ပေး တာ။ `INSTALL.md` ကြည့်။
-
 ## Roadmap
 
 - [ ] Subscription သန့် စင် ရေး (server ဘက် က) — လက် ရှိ Reality ရဲ့
