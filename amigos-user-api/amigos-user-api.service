@@ -1,0 +1,19 @@
+[Unit]
+Description=Amigos user-info API (x-ui read-only)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+# www-data needs read access to the x-ui database:
+#   setfacl -m u:www-data:r /etc/x-ui/x-ui.db
+#   (or add www-data to the group that owns it)
+WorkingDirectory=/opt/amigos-user-api
+ExecStart=/opt/amigos-user-api/venv/bin/uvicorn app:app --host 127.0.0.1 --port 8899 --workers 1
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

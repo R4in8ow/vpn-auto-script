@@ -376,6 +376,18 @@ UFW is only the OS firewall. DigitalOcean, AWS, Vultr, etc. enforce a
 there, or connections will silently time out. This is the single most
 common cause of "it works locally but not from my phone".
 
+## Extras
+
+Two optional add-ons live alongside the installer (secret-free, generic):
+
+- [`verify-free-servers/`](verify-free-servers/) — weekly prober that
+  handshake-verifies third-party VLESS/Trojan backup nodes with xray-core
+  and publishes `free-servers.json`. See `INSTALL.md`.
+- [`amigos-user-api/`](amigos-user-api/) — read-only FastAPI service
+  exposing per-user expiry/traffic from the 3x-ui database
+  (`GET /api/user/{username}`), plus systemd unit and nginx snippet.
+  See `DEPLOY.md`.
+
 ## Roadmap
 
 - [ ] Server-side subscription sanitization (Reality currently exposes
