@@ -1,4 +1,4 @@
-# VPN Auto-Script
+# X-Ui Bypass with DPI
 
 [![Ubuntu 24.04](https://img.shields.io/badge/Ubuntu-24.04%20%7C%2022.04-E95420?logo=ubuntu&logoColor=white)](https://ubuntu.com)
 [![3x-ui](https://img.shields.io/badge/panel-3x--ui-blue)](https://github.com/MHSanaei/3x-ui)
@@ -59,8 +59,8 @@ public UDP/40797 ──▶ Hysteria2        public 58023/tcp+udp ──▶ Shado
 ## အသုံး ပြု ပုံ
 
 ```bash
-git clone https://github.com/R4in8ow/vpn-auto-script.git
-cd vpn-auto-script
+git clone https://github.com/R4in8ow/x-ui-bypass-with-dpi.git
+cd x-ui-bypass-with-dpi
 sudo bash install.sh
 ```
 
